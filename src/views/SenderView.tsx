@@ -12,36 +12,52 @@ import {
   Step,
   StepLabel,
   CircularProgress,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  FormHelperText,
 } from '@mui/material';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import SchoolIcon from '@mui/icons-material/School';
 
 interface Delivery {
   id: string;
   status: 'pending' | 'picked-up' | 'in-transit' | 'delivered';
   pickupAddress: string;
-  dropoffAddress: string;
+  dropoffLocation: string;
   instructions: string;
   estimatedTime: string;
   driverLocation?: {
     lat: number;
     lng: number;
   };
+  leaveOutTime: string;
 }
+
+const commonPickupLocations = [
+  { id: '1', name: 'Main Campus Center', address: '123 Campus Center Dr' },
+  { id: '2', name: 'North Campus Hub', address: '456 North Campus Way' },
+  { id: '3', name: 'Student Union', address: '789 Union Ave' },
+  { id: '4', name: 'Library Plaza', address: '321 Library Rd' },
+];
 
 const SenderView = () => {
   const [delivery, setDelivery] = useState<Delivery>({
     id: '1',
     status: 'pending',
     pickupAddress: '123 Home St, San Francisco',
-    dropoffAddress: '456 College Ave, Berkeley',
+    dropoffLocation: 'Main Campus Center',
     instructions: 'Food is in a cooler on the porch',
     estimatedTime: '30 minutes',
-    driverLocation: { lat: 37.7749, lng: -122.4194 }
+    driverLocation: { lat: 37.7749, lng: -122.4194 },
+    leaveOutTime: '12:00 PM'
   });
 
   const [newInstructions, setNewInstructions] = useState('');
+  const [selectedDropoff, setSelectedDropoff] = useState('');
 
   const handleAddInstructions = () => {
     setDelivery(prev => ({
@@ -49,6 +65,17 @@ const SenderView = () => {
       instructions: prev.instructions + '\n' + newInstructions
     }));
     setNewInstructions('');
+  };
+
+  const handleDropoffChange = (event: any) => {
+    const location = commonPickupLocations.find(loc => loc.id === event.target.value);
+    if (location) {
+      setSelectedDropoff(location.id);
+      setDelivery(prev => ({
+        ...prev,
+        dropoffLocation: location.name
+      }));
+    }
   };
 
   const steps = ['Order Placed', 'Driver Assigned', 'Food Picked Up', 'In Transit', 'Delivered'];
@@ -99,7 +126,23 @@ const SenderView = () => {
                       <SchoolIcon color="primary" sx={{ mr: 1 }} />
                       <Typography variant="subtitle1">Dropoff Location</Typography>
                     </Box>
-                    <Typography>{delivery.dropoffAddress}</Typography>
+                    <FormControl fullWidth sx={{ mt: 1 }}>
+                      <InputLabel>Select Dropoff Location</InputLabel>
+                      <Select
+                        value={selectedDropoff}
+                        onChange={handleDropoffChange}
+                        label="Select Dropoff Location"
+                      >
+                        {commonPickupLocations.map((location) => (
+                          <MenuItem key={location.id} value={location.id}>
+                            {location.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                      <FormHelperText>
+                        Choose a common pickup location for your student
+                      </FormHelperText>
+                    </FormControl>
                   </Paper>
                 </Grid>
               </Grid>
@@ -111,8 +154,17 @@ const SenderView = () => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Add Instructions
+                Delivery Instructions
               </Typography>
+              <TextField
+                fullWidth
+                type="time"
+                label="Leave Food Out By"
+                value={delivery.leaveOutTime}
+                onChange={(e) => setDelivery(prev => ({ ...prev, leaveOutTime: e.target.value }))}
+                InputLabelProps={{ shrink: true }}
+                sx={{ mb: 2 }}
+              />
               <TextField
                 fullWidth
                 multiline

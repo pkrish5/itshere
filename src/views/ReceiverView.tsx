@@ -13,12 +13,15 @@ import {
   ListItemIcon,
   Divider,
   Chip,
+  Alert,
 } from '@mui/material';
 import { GoogleMap, LoadScript, Marker } from '@react-google-maps/api';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
 import DirectionsIcon from '@mui/icons-material/Directions';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import SchoolIcon from '@mui/icons-material/School';
 
 const containerStyle = {
   width: '100%',
@@ -34,7 +37,7 @@ interface Delivery {
   id: string;
   status: 'pending' | 'picked-up' | 'in-transit' | 'delivered';
   pickupAddress: string;
-  dropoffAddress: string;
+  dropoffLocation: string;
   instructions: string;
   estimatedTime: string;
   driverLocation?: {
@@ -42,6 +45,9 @@ interface Delivery {
     lng: number;
   };
   foodItems: string[];
+  senderName: string;
+  leaveOutTime: string;
+  pickupInstructions?: string;
 }
 
 const ReceiverView = () => {
@@ -49,11 +55,14 @@ const ReceiverView = () => {
     id: '1',
     status: 'in-transit',
     pickupAddress: '123 Home St, San Francisco',
-    dropoffAddress: '456 College Ave, Berkeley',
+    dropoffLocation: 'Main Campus Center',
     instructions: 'Food is in a cooler on the porch',
     estimatedTime: '15 minutes',
     driverLocation: { lat: 37.7749, lng: -122.4194 },
-    foodItems: ['Mom\'s Special Biryani', 'Chicken Curry', 'Naan Bread', 'Gulab Jamun']
+    foodItems: ['Mom\'s Special Biryani', 'Chicken Curry', 'Naan Bread', 'Gulab Jamun'],
+    senderName: 'Mom',
+    leaveOutTime: '12:00 PM',
+    pickupInstructions: 'Pick up from the designated food pickup area in the Main Campus Center'
   });
 
   const getStatusColor = (status: string) => {
@@ -68,6 +77,21 @@ const ReceiverView = () => {
         return 'success';
       default:
         return 'default';
+    }
+  };
+
+  const getStatusMessage = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return 'Your food is being prepared';
+      case 'picked-up':
+        return 'Your food has been picked up and is on its way';
+      case 'in-transit':
+        return 'Your food is on its way to campus';
+      case 'delivered':
+        return 'Your food has been delivered to the pickup location';
+      default:
+        return '';
     }
   };
 
@@ -90,6 +114,9 @@ const ReceiverView = () => {
                   color={getStatusColor(delivery.status)}
                 />
               </Box>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                {getStatusMessage(delivery.status)}
+              </Alert>
               <LoadScript googleMapsApiKey="YOUR_GOOGLE_MAPS_API_KEY">
                 <GoogleMap
                   mapContainerStyle={containerStyle}
@@ -118,7 +145,7 @@ const ReceiverView = () => {
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Food Items
+                Food Items from {delivery.senderName}
               </Typography>
               <List>
                 {delivery.foodItems.map((item, index) => (
@@ -145,10 +172,15 @@ const ReceiverView = () => {
               </Typography>
               <Paper sx={{ p: 2, mb: 2 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                  <LocationOnIcon color="primary" sx={{ mr: 1 }} />
+                  <SchoolIcon color="primary" sx={{ mr: 1 }} />
                   <Typography variant="subtitle1">Pickup Location</Typography>
                 </Box>
-                <Typography>{delivery.dropoffAddress}</Typography>
+                <Typography>{delivery.dropoffLocation}</Typography>
+                {delivery.pickupInstructions && (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    {delivery.pickupInstructions}
+                  </Typography>
+                )}
               </Paper>
 
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -163,10 +195,20 @@ const ReceiverView = () => {
                 color="primary"
                 startIcon={<DirectionsIcon />}
                 fullWidth
-                href={`https://www.google.com/maps/dir/?api=1&destination=${delivery.dropoffAddress}`}
+                href={`https://www.google.com/maps/dir/?api=1&destination=${delivery.dropoffLocation}`}
                 target="_blank"
+                sx={{ mb: 2 }}
               >
-                Get Directions
+                Get Directions to Pickup
+              </Button>
+
+              <Button
+                variant="outlined"
+                color="primary"
+                startIcon={<NotificationsIcon />}
+                fullWidth
+              >
+                Enable Notifications
               </Button>
 
               <Box sx={{ mt: 3 }}>
