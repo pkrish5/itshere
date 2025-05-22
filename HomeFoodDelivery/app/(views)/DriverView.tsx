@@ -1,137 +1,401 @@
-import React, { useState } from 'react';
-import { View, Text, Button, StyleSheet, FlatList, TouchableOpacity, ScrollView } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
-import { MaterialIcons, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
-
-const initialStops = [
-  {
-    id: '1',
-    address: '123 Home St, San Francisco',
-    type: 'pickup',
-    instructions: 'Food is in a cooler on the porch',
-    coordinates: { latitude: 37.7749, longitude: -122.4194 },
-    leaveOutTime: '12:00 PM',
-    status: 'pending',
-  },
-  {
-    id: '2',
-    address: 'Main Campus Center, 123 Campus Center Dr',
-    type: 'dropoff',
-    coordinates: { latitude: 37.8719, longitude: -122.2585 },
-    status: 'pending',
-    studentName: 'John Doe',
-  },
-  {
-    id: '3',
-    address: '456 Home Ave, Oakland',
-    type: 'pickup',
-    instructions: 'Food is in a thermal bag by the door',
-    coordinates: { latitude: 37.8044, longitude: -122.2712 },
-    leaveOutTime: '12:30 PM',
-    status: 'pending',
-  },
-  {
-    id: '4',
-    address: 'Student Union, 789 Union Ave',
-    type: 'dropoff',
-    coordinates: { latitude: 37.8715, longitude: -122.2600 },
-    status: 'pending',
-    studentName: 'Jane Smith',
-  },
-];
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Switch, TextInput, FlatList } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../../src/contexts/AuthContext';
+import { storageService, DeliveryRequest, DriverAvailability } from '../../src/services/StorageService';
+import { locationService } from '../../src/services/LocationService';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import { Picker } from '@react-native-picker/picker';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
+import Constants from 'expo-constants';
 
 export default function DriverView() {
-  const [stops, setStops] = useState(initialStops);
-  const [currentStop, setCurrentStop] = useState(0);
+  const router = useRouter();
+  const { user, logout } = useAuth();
+  const [isAvailable, setIsAvailable] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [maxCapacity, setMaxCapacity] = useState('1');
+  const [radius, setRadius] = useState('5');
+  const [activeDelivery, setActiveDelivery] = useState<DeliveryRequest | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [pickupLocation, setPickupLocation] = useState<{ address: string; coordinates: { latitude: number; longitude: number } } | null>(null);
+  const [destinationLocation, setDestinationLocation] = useState<{ address: string; coordinates: { latitude: number; longitude: number } } | null>(null);
+  const apiKey = Constants.expoConfig?.extra?.googleMapsApiKey;
 
-  const handleStopComplete = (stopId) => {
-    setStops(prev => prev.map(stop =>
-      stop.id === stopId ? { ...stop, status: 'completed' } : stop
-    ));
-    setCurrentStop(prev => prev + 1);
+  useEffect(() => {
+    loadCurrentLocation();
+    loadActiveDelivery();
+  }, []);
+
+  const loadCurrentLocation = async () => {
+    try {
+      const location = await locationService.getCurrentLocation();
+      setCurrentLocation(location);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to get current location');
+    }
+  };
+
+  const loadActiveDelivery = async () => {
+    try {
+      const deliveries = await storageService.getDeliveryRequests();
+      const active = deliveries.find(d => d.driverId === user?.id && d.status === 'in_progress');
+      if (active) {
+        setActiveDelivery(active);
+        await locationService.startLocationTracking(active.id);
+      }
+    } catch (error) {
+      console.error('Error loading active delivery:', error);
+    }
+  };
+
+  const handleAvailabilityToggle = async (value: boolean) => {
+    setIsAvailable(value);
+    if (value) {
+      try {
+        setLoading(true);
+        if (!currentLocation) {
+          throw new Error('Current location not available');
+        }
+
+        await storageService.createDriverAvailability({
+          driverId: user?.id || '',
+          startLocation: pickupLocation?.coordinates || currentLocation,
+          destination: destinationLocation?.address || 'Any',
+          dateTime: new Date().toISOString(),
+          radius: parseInt(radius),
+          maxCapacity: parseInt(maxCapacity),
+        });
+      } catch (error) {
+        Alert.alert('Error', 'Failed to set availability');
+        setIsAvailable(false);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      router.replace('/sign-in');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to logout');
+    }
   };
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.header}>Driver Dashboard</Text>
-      <MapView
-        style={styles.map}
-        initialRegion={{
-          latitude: 37.8,
-          longitude: -122.3,
-          latitudeDelta: 0.15,
-          longitudeDelta: 0.15,
-        }}
-      >
-        {stops.map((stop) => (
-          <Marker
-            key={stop.id}
-            coordinate={stop.coordinates}
-            title={stop.type === 'pickup' ? 'Pickup' : 'Dropoff'}
-            description={stop.address}
-            pinColor={stop.type === 'pickup' ? 'red' : 'green'}
-          />
-        ))}
-      </MapView>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Delivery Stops</Text>
-        <FlatList
-          data={stops}
-          keyExtractor={item => item.id}
-          renderItem={({ item, index }) => (
-            <View style={styles.stopItem}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                {item.type === 'pickup' ? (
-                  <MaterialIcons name="location-on" size={20} color="red" />
-                ) : (
-                  <FontAwesome5 name="school" size={20} color="green" />
-                )}
-                <Text style={styles.stopType}>{item.type === 'pickup' ? 'Pickup' : 'Dropoff'}</Text>
-                {item.status === 'completed' && (
-                  <MaterialCommunityIcons name="check-circle" size={18} color="green" style={{ marginLeft: 4 }} />
-                )}
-                {index === currentStop && (
-                  <Text style={styles.currentStop}>Current Stop</Text>
-                )}
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Driver Dashboard</Text>
+        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={styles.content}>
+        <View style={styles.mapContainer}>
+          <MapView
+            provider={PROVIDER_GOOGLE}
+            style={styles.map}
+            initialRegion={{
+              latitude: currentLocation?.latitude || 37.78825,
+              longitude: currentLocation?.longitude || -122.4324,
+              latitudeDelta: 0.0922,
+              longitudeDelta: 0.0421,
+            }}
+          >
+            {currentLocation && (
+              <Marker
+                coordinate={currentLocation}
+                title="Your Location"
+                pinColor="blue"
+              />
+            )}
+            {pickupLocation && (
+              <Marker
+                coordinate={pickupLocation.coordinates}
+                title="Pickup Location"
+                pinColor="green"
+              />
+            )}
+            {destinationLocation && (
+              <Marker
+                coordinate={destinationLocation.coordinates}
+                title="Destination"
+                pinColor="red"
+              />
+            )}
+            {activeDelivery && (
+              <>
+                <Marker
+                  coordinate={activeDelivery.pickupLocation}
+                  title="Pickup Location"
+                  pinColor="green"
+                />
+                <Marker
+                  coordinate={activeDelivery.dropoffLocation}
+                  title="Dropoff Location"
+                  pinColor="red"
+                />
+              </>
+            )}
+          </MapView>
+        </View>
+
+        <View style={styles.availabilityContainer}>
+          <View style={styles.availabilityHeader}>
+            <Text style={styles.availabilityTitle}>Set Availability</Text>
+            <Switch
+              value={isAvailable}
+              onValueChange={handleAvailabilityToggle}
+              disabled={loading}
+            />
+          </View>
+
+          {isAvailable && (
+            <View style={styles.availabilitySettings}>
+              <View style={styles.locationInputContainer}>
+                <Text style={styles.settingLabel}>Pickup Location:</Text>
+                <GooglePlacesAutocomplete
+                  key="start-location"
+                  placeholder="Enter your starting location"
+                  onPress={(data, details = null) => {
+                    if (details) {
+                      setPickupLocation({
+                        address: data.description,
+                        coordinates: {
+                          latitude: details.geometry.location.lat,
+                          longitude: details.geometry.location.lng,
+                        },
+                      });
+                    }
+                  }}
+                  fetchDetails={true}
+                  predefinedPlaces={[]}
+                  query={{
+                    key: apiKey,
+                    language: 'en',
+                  }}
+                  styles={{
+                    textInput: styles.locationInput,
+                    container: { flex: 0 },
+                  }}
+                  textInputProps={{
+                    onFocus: () => {},
+                    onBlur: () => {},
+                  }}
+                />
               </View>
-              <Text style={styles.stopAddress}>{item.address}</Text>
-              {item.type === 'pickup' && item.leaveOutTime && (
-                <Text style={styles.stopDetail}>Leave out by: {item.leaveOutTime}</Text>
-              )}
-              {item.type === 'dropoff' && item.studentName && (
-                <Text style={styles.stopDetail}>Student: {item.studentName}</Text>
-              )}
-              {item.instructions && (
-                <Text style={styles.stopDetail}>Instructions: {item.instructions}</Text>
-              )}
-              {index === currentStop && (
-                <TouchableOpacity
-                  style={styles.completeButton}
-                  onPress={() => handleStopComplete(item.id)}
+
+              <View style={styles.locationInputContainer}>
+                <Text style={styles.settingLabel}>Destination:</Text>
+                <GooglePlacesAutocomplete
+                  placeholder="Enter destination"
+                  fetchDetails={true}
+                  predefinedPlaces={[]} 
+                  onPress={(data, details = null) => {
+                    if (details) {
+                      setDestinationLocation({
+                        address: data.description,
+                        coordinates: {
+                          latitude: details.geometry.location.lat,
+                          longitude: details.geometry.location.lng,
+                        },
+                      });
+                    }
+                  }}
+                  query={{
+                    key: apiKey,
+                    language: 'en',
+                  }}
+                  styles={googlePlacesStyles}
+                  textInputProps={{
+                    onFocus: () => {},
+                    onBlur: () => {},
+                  }}
+                />
+              </View>
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Max Capacity:</Text>
+                <Picker
+                  selectedValue={maxCapacity}
+                  style={styles.picker}
+                  onValueChange={setMaxCapacity}
                 >
-                  <Text style={{ color: '#fff', textAlign: 'center' }}>
-                    Mark {item.type === 'pickup' ? 'Pickup' : 'Dropoff'} Complete
-                  </Text>
-                </TouchableOpacity>
-              )}
+                  {[1, 2, 3, 4, 5].map(num => (
+                    <Picker.Item key={num} label={num.toString()} value={num.toString()} />
+                  ))}
+                </Picker>
+              </View>
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Search Radius (km):</Text>
+                <Picker
+                  selectedValue={radius}
+                  style={styles.picker}
+                  onValueChange={setRadius}
+                >
+                  {[5, 10, 15, 20, 25].map(num => (
+                    <Picker.Item key={num} label={num.toString()} value={num.toString()} />
+                  ))}
+                </Picker>
+              </View>
             </View>
           )}
-        />
-      </View>
-    </ScrollView>
+        </View>
+
+        {activeDelivery && (
+          <View style={styles.activeDeliveryContainer}>
+            <Text style={styles.activeDeliveryTitle}>Active Delivery</Text>
+            <Text style={styles.deliveryInfo}>
+              Status: {activeDelivery.status}
+            </Text>
+            <Text style={styles.deliveryInfo}>
+              Instructions: {activeDelivery.instructions}
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F7F7F7' },
-  header: { fontSize: 24, fontWeight: 'bold', margin: 16 },
-  map: { width: '100%', height: 250, marginBottom: 16 },
-  card: { backgroundColor: '#fff', borderRadius: 8, padding: 16, margin: 16, elevation: 2 },
-  cardTitle: { fontWeight: 'bold', fontSize: 16, marginBottom: 8 },
-  stopItem: { marginBottom: 16, borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 8 },
-  stopType: { fontWeight: 'bold', marginLeft: 8 },
-  stopAddress: { color: '#333', marginTop: 4 },
-  stopDetail: { color: '#666', fontSize: 12, marginTop: 2 },
-  currentStop: { backgroundColor: '#4ECDC4', color: '#fff', borderRadius: 6, paddingHorizontal: 8, marginLeft: 8, fontSize: 12 },
-  completeButton: { backgroundColor: '#FF6B6B', borderRadius: 6, padding: 8, marginTop: 8 },
-}); 
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  logoutButton: {
+    padding: 8,
+  },
+  logoutText: {
+    color: '#007AFF',
+    fontSize: 16,
+  },
+  content: {
+    flex: 1,
+  },
+  mapContainer: {
+    height: 300,
+    margin: 20,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  map: {
+    flex: 1,
+  },
+  availabilityContainer: {
+    margin: 20,
+    padding: 15,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 10,
+  },
+  availabilityHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  availabilityTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  availabilitySettings: {
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    paddingTop: 15,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  settingLabel: {
+    flex: 1,
+    fontSize: 16,
+  },
+  picker: {
+    flex: 1,
+  },
+  activeDeliveryContainer: {
+    margin: 20,
+    padding: 15,
+    backgroundColor: '#f8f8f8',
+    borderRadius: 10,
+  },
+  activeDeliveryTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  deliveryInfo: {
+    fontSize: 16,
+    marginBottom: 5,
+    color: '#666',
+  },
+  locationInputContainer: {
+    marginBottom: 15,
+  },
+  locationInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 5,
+    padding: 10,
+    fontSize: 16,
+    backgroundColor: '#fff',
+  },
+  autocompleteContainer: {
+    flex: 0,
+    marginTop: 5,
+  },
+  autocompleteList: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 5,
+    zIndex: 1000,
+  },
+});
+
+const googlePlacesStyles = {
+  container: {
+    flex: 0,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 5,
+    padding: 10,
+    fontSize: 16,
+    backgroundColor: '#fff',
+  },
+  listView: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 5,
+    zIndex: 1000,
+  },
+}; 

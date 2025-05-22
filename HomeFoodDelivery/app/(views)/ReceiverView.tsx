@@ -1,134 +1,182 @@
-import React, { useState } from 'react';
-import { View, Text, Button, StyleSheet, FlatList, ScrollView, TouchableOpacity, Linking } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
-import { MaterialIcons, FontAwesome5, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
-
-const initialDelivery = {
-  status: 'in-transit',
-  pickupAddress: '123 Home St, San Francisco',
-  dropoffLocation: 'Main Campus Center',
-  instructions: 'Food is in a cooler on the porch',
-  estimatedTime: '15 minutes',
-  driverLocation: { latitude: 37.7749, longitude: -122.4194 },
-  foodItems: ["Mom's Special Biryani", 'Chicken Curry', 'Naan Bread', 'Gulab Jamun'],
-  senderName: 'Mom',
-  leaveOutTime: '12:00 PM',
-  pickupInstructions: 'Pick up from the designated food pickup area in the Main Campus Center',
-};
-
-const getStatusColor = (status) => {
-  switch (status) {
-    case 'pending': return '#aaa';
-    case 'picked-up': return '#4ECDC4';
-    case 'in-transit': return '#FFB300';
-    case 'delivered': return '#4CAF50';
-    default: return '#aaa';
-  }
-};
-
-const getStatusMessage = (status) => {
-  switch (status) {
-    case 'pending': return 'Your food is being prepared';
-    case 'picked-up': return 'Your food has been picked up and is on its way';
-    case 'in-transit': return 'Your food is on its way to campus';
-    case 'delivered': return 'Your food has been delivered to the pickup location';
-    default: return '';
-  }
-};
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, FlatList } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../../src/contexts/AuthContext';
+import { storageService, DeliveryRequest } from '../../src/services/StorageService';
+import { locationService } from '../../src/services/LocationService';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
 export default function ReceiverView() {
-  const [delivery] = useState(initialDelivery);
+  const router = useRouter();
+  const { user, logout } = useAuth();
+  const [deliveries, setDeliveries] = useState<DeliveryRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedDelivery, setSelectedDelivery] = useState<DeliveryRequest | null>(null);
+
+  useEffect(() => {
+    loadDeliveries();
+    const unsubscribe = storageService.subscribe('deliveryRequests', (data) => {
+      setDeliveries(data);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const loadDeliveries = async () => {
+    try {
+      const allDeliveries = await storageService.getDeliveryRequests();
+      setDeliveries(allDeliveries);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load deliveries');
+    } finally {
+      setLoading(false);
+  }
+};
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      router.replace('/sign-in');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to logout');
+    }
+  };
+
+  const renderDeliveryItem = ({ item }: { item: DeliveryRequest }) => (
+    <TouchableOpacity
+      style={[
+        styles.deliveryItem,
+        selectedDelivery?.id === item.id && styles.selectedDeliveryItem,
+      ]}
+      onPress={() => setSelectedDelivery(item)}
+    >
+      <Text style={styles.deliveryTitle}>
+        Delivery #{item.id.slice(-4)}
+      </Text>
+      <Text style={styles.deliveryStatus}>
+        Status: {item.status}
+      </Text>
+      <Text style={styles.deliveryTime}>
+        Requested: {new Date(item.desiredDateTime).toLocaleString()}
+      </Text>
+    </TouchableOpacity>
+  );
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.header}>Your Food is on the Way!</Text>
-      <View style={styles.card}>
-        <View style={styles.statusRow}>
-          <Text style={styles.cardTitle}>Delivery Status</Text>
-          <View style={[styles.statusChip, { backgroundColor: getStatusColor(delivery.status) }] }>
-            <Text style={{ color: '#fff', fontWeight: 'bold' }}>{delivery.status.toUpperCase()}</Text>
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>My Deliveries</Text>
+        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
           </View>
-        </View>
-        <Text style={styles.statusMsg}>{getStatusMessage(delivery.status)}</Text>
+
+      <View style={styles.content}>
+        <View style={styles.mapContainer}>
         <MapView
+            provider={PROVIDER_GOOGLE}
           style={styles.map}
           initialRegion={{
-            latitude: 37.8719,
-            longitude: -122.2585,
-            latitudeDelta: 0.15,
-            longitudeDelta: 0.15,
+              latitude: 37.78825,
+              longitude: -122.4324,
+              latitudeDelta: 0.0922,
+              longitudeDelta: 0.0421,
           }}
         >
-          {delivery.driverLocation && (
+            {selectedDelivery && (
+              <>
             <Marker
-              coordinate={delivery.driverLocation}
-              title="Driver Location"
-              pinColor="#2196F3"
-            />
-          )}
-          <Marker
-            coordinate={{ latitude: 37.8719, longitude: -122.2585 }}
-            title="Pickup Spot"
+                  coordinate={selectedDelivery.pickupLocation}
+                  title="Pickup Location"
             pinColor="green"
           />
+                <Marker
+                  coordinate={selectedDelivery.dropoffLocation}
+                  title="Dropoff Location"
+                  pinColor="red"
+                />
+              </>
+            )}
         </MapView>
       </View>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Food Items from {delivery.senderName}</Text>
+
         <FlatList
-          data={delivery.foodItems}
-          keyExtractor={item => item}
-          renderItem={({ item }) => (
-            <View style={styles.foodItemRow}>
-              <MaterialCommunityIcons name="food" size={20} color="#FF6B6B" />
-              <Text style={{ marginLeft: 8 }}>{item}</Text>
-            </View>
-          )}
+          data={deliveries}
+          renderItem={renderDeliveryItem}
+          keyExtractor={(item) => item.id}
+          style={styles.deliveryList}
+          contentContainerStyle={styles.deliveryListContent}
         />
       </View>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Pickup Information</Text>
-        <View style={styles.infoRow}>
-          <FontAwesome5 name="school" size={20} color="#4ECDC4" />
-          <Text style={{ marginLeft: 8, fontWeight: 'bold' }}>Pickup Location:</Text>
-          <Text style={{ marginLeft: 4 }}>{delivery.dropoffLocation}</Text>
-        </View>
-        {delivery.pickupInstructions && (
-          <Text style={{ color: '#666', marginTop: 4 }}>{delivery.pickupInstructions}</Text>
-        )}
-        <View style={styles.infoRow}>
-          <MaterialIcons name="access-time" size={20} color="#4ECDC4" />
-          <Text style={{ marginLeft: 8 }}>Estimated Arrival: {delivery.estimatedTime}</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.directionsButton}
-          onPress={() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(delivery.dropoffLocation)}`)}
-        >
-          <Ionicons name="navigate" size={20} color="#fff" />
-          <Text style={{ color: '#fff', marginLeft: 8 }}>Get Directions to Pickup</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.notifyButton}>
-          <MaterialIcons name="notifications-active" size={20} color="#4ECDC4" />
-          <Text style={{ marginLeft: 8, color: '#4ECDC4' }}>Enable Notifications</Text>
-        </TouchableOpacity>
-        <Text style={{ marginTop: 16, fontWeight: 'bold' }}>Special Instructions:</Text>
-        <Text style={{ color: '#666' }}>{delivery.instructions}</Text>
       </View>
-    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F7F7F7' },
-  header: { fontSize: 24, fontWeight: 'bold', margin: 16 },
-  card: { backgroundColor: '#fff', borderRadius: 8, padding: 16, margin: 16, elevation: 2 },
-  cardTitle: { fontWeight: 'bold', fontSize: 16, marginBottom: 8 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  statusChip: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4 },
-  statusMsg: { color: '#666', marginBottom: 8 },
-  map: { width: '100%', height: 200, marginBottom: 16 },
-  foodItemRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  infoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8 },
-  directionsButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#4ECDC4', borderRadius: 6, padding: 10, marginTop: 12, justifyContent: 'center' },
-  notifyButton: { flexDirection: 'row', alignItems: 'center', borderColor: '#4ECDC4', borderWidth: 1, borderRadius: 6, padding: 10, marginTop: 12, justifyContent: 'center' },
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  logoutButton: {
+    padding: 8,
+  },
+  logoutText: {
+    color: '#007AFF',
+    fontSize: 16,
+  },
+  content: {
+    flex: 1,
+  },
+  mapContainer: {
+    height: 300,
+    margin: 20,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  map: {
+    flex: 1,
+  },
+  deliveryList: {
+    flex: 1,
+  },
+  deliveryListContent: {
+    padding: 20,
+  },
+  deliveryItem: {
+    backgroundColor: '#f8f8f8',
+    padding: 15,
+    borderRadius: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  selectedDeliveryItem: {
+    borderColor: '#007AFF',
+    borderWidth: 2,
+  },
+  deliveryTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  deliveryStatus: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 5,
+  },
+  deliveryTime: {
+    fontSize: 14,
+    color: '#999',
+  },
 }); 
